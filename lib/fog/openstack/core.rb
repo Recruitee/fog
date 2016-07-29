@@ -417,6 +417,10 @@ module Fog
       auth_token  = options[:openstack_auth_token] || options[:unscoped_token]
       uri         = options[:openstack_auth_uri]
 
+      if defined?(Redis) and defined?(APP_CONFIG) and APP_CONFIG[:redis_url].present?
+        redis = Redis.new(url: APP_CONFIG[:redis_url])
+      end
+
       identity_v2_connection = Fog::Core::Connection.new(uri.to_s, false, connection_options)
       request_body = {:auth => Hash.new}
 
@@ -432,12 +436,10 @@ module Fog
       end
       request_body[:auth][:tenantName] = tenant_name if tenant_name
 
-      if defined?(Sidekiq)
-        Sidekiq.redis do |redis|
-          response_body = redis.get("openstack_cached_response")
-          if response_body.present?
-            return Fog::JSON.decode(response_body)
-          end
+      if redis.present?
+        response_body = redis.get("openstack_cached_response")
+        if response_body.present?
+          return Fog::JSON.decode(response_body)
         end
       end
 
@@ -449,10 +451,8 @@ module Fog
         :path     => (uri.path and not uri.path.empty?) ? uri.path : 'v2.0'
       })
 
-      if defined?(Sidekiq)
-        Sidekiq.redis do |redis|
-          redis.setex("openstack_cached_response", 3600, response.body)
-        end
+      if redis.present?
+        redis.setex("openstack_cached_response", 3600, response.body)
       end
 
       Fog::JSON.decode(response.body)
