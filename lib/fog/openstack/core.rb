@@ -432,6 +432,15 @@ module Fog
       end
       request_body[:auth][:tenantName] = tenant_name if tenant_name
 
+      if defined?(Sidekiq)
+        Sidekiq.redis do |redis|
+          response_body = redis.get("openstack_cached_response")
+          if response_body.present?
+            return Fog::JSON.decode(response_body)
+          end
+        end
+      end
+
       response = identity_v2_connection.request({
         :expects  => [200, 204],
         :headers  => {'Content-Type' => 'application/json'},
@@ -439,6 +448,12 @@ module Fog
         :method   => 'POST',
         :path     => (uri.path and not uri.path.empty?) ? uri.path : 'v2.0'
       })
+
+      if defined?(Sidekiq)
+        Sidekiq.redis do |redis|
+          redis.setex("openstack_cached_response", 3600, response.body)
+        end
+      end
 
       Fog::JSON.decode(response.body)
     end
